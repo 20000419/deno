@@ -54,6 +54,23 @@ Deno.test("[node/sqlite] in-memory databases", () => {
   }]);
 });
 
+Deno.test(
+  "[node/sqlite] DatabaseSync.function cannot close the database while running",
+  () => {
+    using db = new DatabaseSync(":memory:");
+
+    db.function("close_db", () => {
+      db.close();
+      return 1;
+    });
+
+    const stmt = db.prepare("SELECT close_db() AS value");
+    assertThrows(() => stmt.get(), Error, "Database is already in use");
+
+    assertEquals(stmt.get(), { value: 1, __proto__: null });
+  },
+);
+
 Deno.test("[node/sqlite] Errors originating from SQLite should be thrown", () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

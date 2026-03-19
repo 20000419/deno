@@ -567,6 +567,24 @@ fn bin_commands_for_package(
     .map_err(Into::into)
 }
 
+fn make_autoinstall_flags(old_flags: &Flags, temp_dir: &Path) -> Arc<Flags> {
+  let mut new_flags = (*old_flags).clone();
+  new_flags.node_modules_dir =
+    Some(deno_config::deno_json::NodeModulesDirMode::Auto);
+  let temp_node_modules = temp_dir.join("node_modules");
+  new_flags.internal.root_node_modules_dir_override = Some(temp_node_modules);
+  new_flags.config_flag = crate::args::ConfigFlag::Path(
+    temp_dir.join("deno.json").to_string_lossy().into_owned(),
+  );
+  if matches!(new_flags.allow_scripts, PackagesAllowedScripts::None) {
+    new_flags.allow_scripts = PackagesAllowedScripts::All;
+  }
+
+  log::debug!("new_flags: {:?}", new_flags);
+
+  Arc::new(new_flags)
+}
+
 async fn autoinstall_package(
   req_ref: ReqRef<'_>,
   old_flags: &Flags,
@@ -574,21 +592,6 @@ async fn autoinstall_package(
   yes: bool,
   deno_dir: &Path,
 ) -> Result<(Arc<Flags>, CliFactory), AnyError> {
-  fn make_new_flags(old_flags: &Flags, temp_dir: &Path) -> Arc<Flags> {
-    let mut new_flags = (*old_flags).clone();
-    new_flags.node_modules_dir =
-      Some(deno_config::deno_json::NodeModulesDirMode::Auto);
-    let temp_node_modules = temp_dir.join("node_modules");
-    new_flags.internal.root_node_modules_dir_override = Some(temp_node_modules);
-    new_flags.config_flag = crate::args::ConfigFlag::Path(
-      temp_dir.join("deno.json").to_string_lossy().into_owned(),
-    );
-    new_flags.allow_scripts = PackagesAllowedScripts::All;
-
-    log::debug!("new_flags: {:?}", new_flags);
-
-    Arc::new(new_flags)
-  }
   let temp_dir = create_package_temp_dir(
     Some(req_ref.prefix()),
     req_ref.req(),
@@ -596,7 +599,7 @@ async fn autoinstall_package(
     deno_dir,
   )?;
 
-  let new_flags = make_new_flags(old_flags, temp_dir.path());
+  let new_flags = make_autoinstall_flags(old_flags, temp_dir.path());
   let new_factory = CliFactory::from_flags(new_flags.clone());
 
   match temp_dir {
@@ -697,4 +700,34 @@ enum ReqRefOrUrl {
   Npm(NpmPackageReqReference),
   Jsr(JsrPackageReqReference),
   Url(deno_core::url::Url),
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::path::PathBuf;
+  use std::str::FromStr;
+
+  #[test]
+  fn make_autoinstall_flags_defaults_to_allowing_scripts() {
+    let temp_dir = PathBuf::from("/tmp/deno-x-test");
+    let new_flags = make_autoinstall_flags(&Flags::default(), &temp_dir);
+
+    assert_eq!(new_flags.allow_scripts, PackagesAllowedScripts::All);
+  }
+
+  #[test]
+  fn make_autoinstall_flags_preserves_scoped_allow_scripts() {
+    let temp_dir = PathBuf::from("/tmp/deno-x-test");
+    let flags = Flags {
+      allow_scripts: PackagesAllowedScripts::Some(vec![
+        PackageReq::from_str("@denotest/bin").unwrap(),
+      ]),
+      ..Flags::default()
+    };
+
+    let new_flags = make_autoinstall_flags(&flags, &temp_dir);
+
+    assert_eq!(new_flags.allow_scripts, flags.allow_scripts);
+  }
 }

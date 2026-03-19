@@ -161,6 +161,20 @@ Deno.test({
     assertThrows(() => {
       new DatabaseSync("test.db", { readOnly: true });
     }, Deno.errors.NotCapable);
+    assertThrows(() => {
+      new DatabaseSync(new URL("file:///test.db"));
+    }, Deno.errors.NotCapable);
+  },
+});
+
+Deno.test({
+  name: "[node/sqlite] backup URL path respects permissions",
+  permissions: { read: true, write: false },
+  async fn() {
+    using db = new DatabaseSync(":memory:");
+    await nodeAssert.rejects(async () => {
+      await backup(db, new URL(`file://${tempDir}/backup_permission.db`));
+    }, Deno.errors.NotCapable);
   },
 });
 

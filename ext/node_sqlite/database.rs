@@ -1440,15 +1440,7 @@ impl DatabaseSync {
     // SAFETY: lifetime of the connection is guaranteed by reference counting.
     let raw_handle = unsafe { conn.handle() };
 
-    {
-      let mut authorizer_data = self.authorizer_data.borrow_mut();
-      if let Some(old_data_ptr) = authorizer_data.take() {
-        // SAFETY: data_ptr was allocated in authorizer setup.
-        unsafe {
-          free_authorizer_data(old_data_ptr);
-        }
-      }
-    }
+    let old_data_ptr = *self.authorizer_data.borrow();
 
     if callback.is_null() {
       // SAFETY: `raw_handle` is a valid database handle.
@@ -1460,6 +1452,13 @@ impl DatabaseSync {
         )
       };
       check_error_code(result, raw_handle)?;
+      if let Some(old_data_ptr) = self.authorizer_data.borrow_mut().take() {
+        // SAFETY: data_ptr was allocated in authorizer setup and is no longer
+        // referenced by SQLite after clearing the authorizer above.
+        unsafe {
+          free_authorizer_data(old_data_ptr);
+        }
+      }
       return Ok(());
     }
 
@@ -1502,7 +1501,15 @@ impl DatabaseSync {
       check_error_code(result, raw_handle)?;
     }
 
-    *self.authorizer_data.borrow_mut() = Some(data_ptr);
+    let previous_data_ptr = self.authorizer_data.replace(Some(data_ptr));
+    debug_assert_eq!(previous_data_ptr, old_data_ptr);
+    if let Some(old_data_ptr) = previous_data_ptr {
+      // SAFETY: data_ptr was allocated in authorizer setup and is no longer
+      // referenced by SQLite after registering the new authorizer above.
+      unsafe {
+        free_authorizer_data(old_data_ptr);
+      }
+    }
 
     Ok(())
   }

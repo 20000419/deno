@@ -1900,10 +1900,12 @@ impl AllowDescriptor for NetDescriptor {
     match (self.1.is_some(), other.1.is_some()) {
       (true, false) => Ordering::Less,
       (false, true) => Ordering::Greater,
-      (true, true) | (false, false) => match self.0.cmp(&other.0) {
-        Ordering::Equal => self.1.cmp(&other.1),
-        ordering => ordering,
-      },
+      (true, true) | (false, false) => {
+        match self.cmp_host_specificity(&other.0) {
+          Ordering::Equal => self.1.cmp(&other.1),
+          ordering => ordering,
+        }
+      }
     }
   }
 
@@ -1922,8 +1924,35 @@ impl DenyDescriptor for NetDescriptor {
 }
 
 impl NetDescriptor {
+  fn cmp_host_specificity(&self, other: &Host) -> Ordering {
+    match (&self.0, other) {
+      (Host::Ip(a), Host::IpSubnet(b)) if b.contains(*a) => Ordering::Less,
+      (Host::IpSubnet(a), Host::Ip(b)) if a.contains(*b) => Ordering::Greater,
+      (Host::IpSubnet(a), Host::IpSubnet(b)) => {
+        match compare_ip_subnet_specificity(a, b) {
+          Ordering::Equal => self.0.cmp(other),
+          ordering => ordering,
+        }
+      }
+      _ => self.0.cmp(other),
+    }
+  }
+
   pub fn into_import(self) -> ImportDescriptor {
     ImportDescriptor(self)
+  }
+}
+
+fn compare_ip_subnet_specificity(a: &IpNetwork, b: &IpNetwork) -> Ordering {
+  let network_order = a.network().cmp(&b.network());
+  let prefix_order = b.prefix().cmp(&a.prefix());
+
+  if network_order == Ordering::Equal {
+    prefix_order
+  } else if a.contains(b.network()) || b.contains(a.network()) {
+    prefix_order.then(network_order)
+  } else {
+    network_order.then(prefix_order)
   }
 }
 
@@ -8542,6 +8571,16 @@ mod tests {
       &parse_granted("10.0.0.1"),
       Ordering::Greater,
     );
+    check_comparison(
+      &parse_granted("10.0.0.1"),
+      &parse_granted("10.0.0.0/8"),
+      Ordering::Less,
+    );
+    check_comparison(
+      &parse_granted("10.0.0.0/16"),
+      &parse_granted("10.0.0.0/8"),
+      Ordering::Less,
+    );
 
     // Test IPv6 addresses
     check_comparison(
@@ -8572,6 +8611,34 @@ mod tests {
       &parse_prompt_denied("sub.example.com"),
       &parse_flag_denied("example.com"),
       Ordering::Less,
+    );
+  }
+
+  #[test]
+  fn test_net_denies_more_specific_subnets_before_broader_allows() {
+    let parser = TestPermissionDescriptorParser;
+    let perms = Permissions {
+      net: Permissions::new_unary(
+        Some(vec![parser.parse_net_descriptor("10.0.0.0/8").unwrap()]),
+        Some(vec![parser.parse_net_descriptor("10.0.0.0/16").unwrap()]),
+        false,
+      ),
+      ..Permissions::none_without_prompt()
+    };
+
+    assert_eq!(
+      perms.net.query(Some(&NetDescriptor(
+        Host::must_parse("10.0.1.1"),
+        Some(443),
+      ))),
+      PermissionState::Denied,
+    );
+    assert_eq!(
+      perms.net.query(Some(&NetDescriptor(
+        Host::must_parse("10.1.1.1"),
+        Some(443),
+      ))),
+      PermissionState::Granted,
     );
   }
 

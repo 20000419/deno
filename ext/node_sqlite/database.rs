@@ -516,6 +516,7 @@ pub struct DatabaseSync {
   options: DatabaseSyncOptions,
   location: String,
   ignore_next_sqlite_error: Rc<Cell<bool>>,
+  active_callbacks: Rc<Cell<usize>>,
   authorizer_data: Rc<RefCell<Option<*mut AuthorizerData>>>,
 }
 
@@ -724,6 +725,7 @@ impl DatabaseSync {
       location,
       options,
       ignore_next_sqlite_error: Rc::new(Cell::new(false)),
+      active_callbacks: Rc::new(Cell::new(0)),
       authorizer_data: Rc::new(RefCell::new(None)),
     })
   }
@@ -770,6 +772,10 @@ impl DatabaseSync {
   fn close(&self) -> Result<(), SqliteError> {
     if self.conn.borrow().is_none() {
       return Err(SqliteError::AlreadyClosed);
+    }
+
+    if self.active_callbacks.get() > 0 {
+      return Err(SqliteError::InUse);
     }
 
     // Finalize all prepared statements
@@ -1034,6 +1040,7 @@ impl DatabaseSync {
       context,
       use_big_int_arguments,
       ignore_next_sqlite_error: Rc::clone(&self.ignore_next_sqlite_error),
+      active_callbacks: Rc::clone(&self.active_callbacks),
     });
     let data_ptr = Box::into_raw(data);
 
@@ -1480,6 +1487,7 @@ impl DatabaseSync {
       callback: callback_global,
       context: context_global,
       ignore_next_sqlite_error: Rc::clone(&self.ignore_next_sqlite_error),
+      active_callbacks: Rc::clone(&self.active_callbacks),
     });
     let data_ptr = Box::into_raw(data);
 
@@ -1599,6 +1607,7 @@ impl DatabaseSync {
       inverse_fn,
       final_fn,
       ignore_next_sqlite_error: Rc::clone(&self.ignore_next_sqlite_error),
+      active_callbacks: Rc::clone(&self.active_callbacks),
     });
 
     let custom_aggregate_ptr = Box::into_raw(custom_aggregate);
@@ -1687,6 +1696,19 @@ struct AggregateData {
   initialized: bool,
 }
 
+struct CallbackGuard<'a>(&'a Cell<usize>);
+
+impl Drop for CallbackGuard<'_> {
+  fn drop(&mut self) {
+    self.0.set(self.0.get() - 1);
+  }
+}
+
+fn enter_callback(active_callbacks: &Cell<usize>) -> CallbackGuard<'_> {
+  active_callbacks.set(active_callbacks.get() + 1);
+  CallbackGuard(active_callbacks)
+}
+
 struct CustomAggregate {
   context: NonNull<v8::Context>,
   use_big_int_arguments: bool,
@@ -1695,6 +1717,7 @@ struct CustomAggregate {
   inverse_fn: Option<NonNull<v8::Function>>,
   final_fn: Option<NonNull<v8::Function>>,
   ignore_next_sqlite_error: Rc<Cell<bool>>,
+  active_callbacks: Rc<Cell<usize>>,
 }
 
 enum AggregateStepKind {
@@ -1769,6 +1792,7 @@ unsafe fn custom_aggregate_step_base(
     }
 
     let data = &*data_ptr;
+    let _callback_guard = enter_callback(&data.active_callbacks);
     let context_local: v8::Local<v8::Context> =
       std::mem::transmute(data.context.as_ptr());
 
@@ -1873,6 +1897,7 @@ unsafe fn custom_aggregate_value_base(
     }
 
     let data = &*data_ptr;
+    let _callback_guard = enter_callback(&data.active_callbacks);
     let context_local: v8::Local<v8::Context> =
       std::mem::transmute(data.context.as_ptr());
 
@@ -2013,12 +2038,14 @@ struct CustomFunctionData {
   context: NonNull<v8::Context>,
   use_big_int_arguments: bool,
   ignore_next_sqlite_error: Rc<Cell<bool>>,
+  active_callbacks: Rc<Cell<usize>>,
 }
 
 struct AuthorizerData {
   callback: NonNull<v8::Function>,
   context: NonNull<v8::Context>,
   ignore_next_sqlite_error: Rc<Cell<bool>>,
+  active_callbacks: Rc<Cell<usize>>,
 }
 
 unsafe extern "C" fn custom_function_handler(
@@ -2039,6 +2066,7 @@ unsafe extern "C" fn custom_function_handler(
     }
 
     let data = &*data_ptr;
+    let _callback_guard = enter_callback(&data.active_callbacks);
     let context_local: v8::Local<v8::Context> =
       std::mem::transmute(data.context.as_ptr());
 
@@ -2294,6 +2322,7 @@ unsafe extern "C" fn authorizer_callback(
     }
 
     let data = &*data_ptr;
+    let _callback_guard = enter_callback(&data.active_callbacks);
     let context_local: v8::Local<v8::Context> =
       std::mem::transmute(data.context.as_ptr());
 

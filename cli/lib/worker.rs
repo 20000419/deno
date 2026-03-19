@@ -378,7 +378,7 @@ impl<TSys: DenoLibSys> LibWorkerFactorySharedState<TSys> {
           shared.npm_process_state_provider.clone(),
         ),
         permissions: args.permissions,
-        bundle_provider: shared.bundle_provider.clone(),
+        bundle_provider: None,
       };
       let maybe_initial_cwd = shared.options.maybe_initial_cwd.clone();
       // Apply resource limits to v8::CreateParams if specified.

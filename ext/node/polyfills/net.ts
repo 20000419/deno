@@ -1797,7 +1797,15 @@ Socket.prototype[kReinitializeHandle] = function (handle) {
   this._handle?.close();
 
   // Make sure TLS wrap works after reinitialize.
-  handle.afterConnectTls = this._handle.afterConnectTls;
+  if (typeof this._handle?.afterConnectTls === "function") {
+    const { promise, resolve } = Promise.withResolvers();
+    handle.afterConnectTls = this._handle.afterConnectTls;
+    handle.afterConnectTlsResolve = resolve;
+    handle.upgrading = promise;
+    handle.verifyError = this._handle.verifyError;
+    handle._parent = handle;
+    handle._parentWrap = this._handle._parentWrap;
+  }
 
   this._handle = handle;
   this._handle[ownerSymbol] = this;

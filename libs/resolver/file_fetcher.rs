@@ -74,6 +74,12 @@ pub struct GetCachedSourceOrLocalError(
 #[derive(Debug, Error, JsError)]
 pub enum GetCachedSourceOrLocalErrorKind {
   #[error(transparent)]
+  #[class(generic)]
+  UnsupportedScheme(#[from] UnsupportedSchemeError),
+  #[error(transparent)]
+  #[class(generic)]
+  PermissionCheck(#[from] PermissionCheckError),
+  #[error(transparent)]
   #[class(inherit)]
   FetchLocal(#[from] deno_cache_dir::file_fetcher::FetchLocalError),
   #[error(transparent)]
@@ -353,7 +359,14 @@ impl<
   pub fn get_cached_source_or_local(
     &self,
     specifier: &Url,
+    permissions: FetchPermissionsOptionRef<'_>,
   ) -> Result<Option<File>, GetCachedSourceOrLocalError> {
+    validate_scheme(specifier)?;
+    if let FetchPermissionsOptionRef::Restricted(permissions, kind) =
+      permissions
+    {
+      permissions.check_specifier(specifier, kind)?;
+    }
     if specifier.scheme() == "file" {
       Ok(
         self

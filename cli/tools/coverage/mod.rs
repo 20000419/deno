@@ -639,8 +639,10 @@ pub fn cover_files(
       cli_options.initial_cwd(),
     )?;
 
-    let maybe_file_result =
-      file_fetcher.get_cached_source_or_local(&module_specifier);
+    let maybe_file_result = file_fetcher.get_cached_source_or_local(
+      &module_specifier,
+      deno_resolver::file_fetcher::FetchPermissionsOptionRef::AllowAll,
+    );
     let file = match maybe_file_result {
       Ok(Some(file)) => TextDecodedFile::decode(file)?,
       Ok(None) => {

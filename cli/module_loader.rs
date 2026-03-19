@@ -1269,11 +1269,14 @@ impl<TGraphContainer: ModuleGraphContainer> ModuleLoader
   ) -> Option<Cow<'_, [u8]>> {
     let specifier = resolve_url(source_map_url).ok()?;
 
-    if let Ok(Some(file)) = self
-      .0
-      .shared
-      .file_fetcher
-      .get_cached_source_or_local(&specifier)
+    if let Ok(Some(file)) =
+      self.0.shared.file_fetcher.get_cached_source_or_local(
+        &specifier,
+        FetchPermissionsOptionRef::Restricted(
+          &self.0.permissions,
+          CheckSpecifierKind::Static,
+        ),
+      )
     {
       return Some(Cow::Owned(file.source.to_vec()));
     }
@@ -1321,11 +1324,14 @@ impl<TGraphContainer: ModuleGraphContainer> ModuleLoader
       }
       None => {
         // Not in graph, try to read from file system (for source-mapped original files)
-        if let Ok(Some(file)) = self
-          .0
-          .shared
-          .file_fetcher
-          .get_cached_source_or_local(&specifier)
+        if let Ok(Some(file)) =
+          self.0.shared.file_fetcher.get_cached_source_or_local(
+            &specifier,
+            FetchPermissionsOptionRef::Restricted(
+              &self.0.permissions,
+              CheckSpecifierKind::Static,
+            ),
+          )
         {
           return extract_source_line(
             &String::from_utf8_lossy(&file.source),

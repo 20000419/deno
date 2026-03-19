@@ -10,6 +10,7 @@ import {
 import type { Buffer } from "node:buffer";
 import { isUint8Array } from "ext:deno_node/internal/util/types.ts";
 import { URLPrototype } from "ext:deno_web/00_url.js";
+import { pathFromURL } from "ext:deno_web/00_infra.js";
 import type { URL } from "node:url";
 
 const {
@@ -60,7 +61,7 @@ const parsePath = (path: unknown): string => {
     if ((path as URL).protocol !== "file:") {
       throw new InvalidURLSchemeError();
     }
-    parsedPath = (path as URL).href;
+    parsedPath = pathFromURL(path as URL);
   }
 
   if (

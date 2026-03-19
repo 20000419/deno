@@ -950,6 +950,26 @@ Deno.test("[node/sqlite] backup fails when progress function throws", async () =
   Deno.removeSync(destDb);
 });
 
+Deno.test("[node/sqlite] setAuthorizer keeps previous callback when validation fails", () => {
+  using db = new DatabaseSync(":memory:");
+  let authorizerCalls = 0;
+
+  db.setAuthorizer(() => {
+    authorizerCalls++;
+    return sqlite.constants.SQLITE_OK;
+  });
+
+  assertThrows(
+    // @ts-expect-error testing runtime validation
+    () => db.setAuthorizer(1),
+    TypeError,
+    'The "callback" argument must be a function or null.',
+  );
+
+  db.exec("CREATE TABLE foo (id INTEGER PRIMARY KEY)");
+  assert(authorizerCalls > 0);
+});
+
 Deno.test("[node/sqlite] backup fails when source db is invalid", async () => {
   using database = new DatabaseSync(":memory:");
   const destDb = `${tempDir}/other_backup_progress.db`;
